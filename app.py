@@ -48,7 +48,10 @@ def figure_data(race: Race) -> dict:
         title, sub = STATIONS[n], f"스테이션 {n + 1} / 8 · {STATIONS_KO[n]}"
 
     ws = wave_start_kst(race)
+    summary, note = finish_summary(race) if race.finished else (None, "")
     return {
+        "summary": summary,
+        "summaryNote": note,
         "stage": stage,
         "anim": anim,
         "kind": kind,
@@ -68,49 +71,54 @@ def figure_data(race: Race) -> dict:
     }
 
 
-def segment_table(race: Race, kind: str) -> pd.DataFrame:
+def segment_table(race: Race) -> pd.DataFrame:
+    """런과 스테이션을 진행 순서대로 한 표에 담는다. 진행 중인 구간에는 ▶ 표시."""
     rows = []
-    for s in race.segments:
-        if s.kind != kind:
-            continue
-        name = s.name if kind == "run" else f"{s.name} ({STATIONS_KO[s.no - 1]})"
-        rows.append({"구간": name, "소요": fmt(s.duration), "누적": fmt(s.cumulative)})
-    return pd.DataFrame(rows)
+    for i, s in enumerate(race.segments):
+        icon = "🏃" if s.kind == "run" else "🏋️"
+        mark = "▶ " if i == race.current_stage else ""
+        rows.append({"구간": f"{mark}{icon} {s.name}", "소요": fmt(s.duration), "누적": fmt(s.cumulative)})
+    return pd.DataFrame(rows).set_index("구간")
 
 
-def finish_summary(race: Race) -> None:
+def finish_summary(race: Race) -> tuple[list[list[str]], str]:
+    """완주 카드에 넣을 요약 수치와 한 줄 메모."""
     runs = [s.duration for s in race.segments if s.kind == "run"]
     stations = [s.duration for s in race.segments if s.kind == "station"]
     station_sum = sum(stations) if None not in stations else None
     run_sum = race.run_total or (sum(runs) if None not in runs else None)
+    summary = [
+        ["러닝 합계", fmt(run_sum)],
+        ["스테이션 합계", fmt(station_sum)],
+        ["록스존", fmt(race.roxzone_total)],
+    ]
 
-    st.markdown("### 기록 요약")
-    cols = st.columns(5)
-    cols[0].metric("최종 기록", fmt(race.total))
-    cols[1].metric("순위", f"{race.rank} / {race.field_size}" if race.rank else "-")
-    cols[2].metric("러닝 합계", fmt(run_sum))
-    cols[3].metric("스테이션 합계", fmt(station_sum))
-    cols[4].metric("록스존", fmt(race.roxzone_total))
-
-    # 가장 빠른/느린 런, 가장 오래 걸린 스테이션
+    note = ""
     run_segs = [s for s in race.segments if s.kind == "run" and s.duration]
     st_segs = [s for s in race.segments if s.kind == "station" and s.duration]
     if run_segs and st_segs:
         fast = min(run_segs, key=lambda s: s.duration)
         slow = max(run_segs, key=lambda s: s.duration)
         hard = max(st_segs, key=lambda s: s.duration)
-        st.caption(
+        note = (
             f"가장 빠른 런 {fast.name} {fmt(fast.duration)} · 가장 느린 런 {slow.name} {fmt(slow.duration)} "
             f"· 가장 오래 걸린 스테이션 {hard.name} {fmt(hard.duration)}"
         )
+    return summary, note
 
 
-st.title("HYROX 실시간 트래커")
+st.header("HYROX 실시간 트래커")
+# ?id=결과ID 로 열면 그 기록을 바로 보여준다
 url = st.text_input(
     "HYRESULT 결과 URL",
+    value=st.query_params.get("id", ""),
     placeholder="https://www.hyresult.com/result/...",
 )
 target = extract_id(url) if url.strip() else None
+if target:
+    st.query_params["id"] = target
+else:
+    st.query_params.clear()
 
 
 @st.fragment(run_every=REFRESH_SEC)
@@ -128,17 +136,11 @@ def tracker(result_id: str) -> None:
         meta.append(f"웨이브 시작 {ws:%H:%M:%S}")
     st.caption(" · ".join(m for m in meta if m))
 
-    html = TEMPLATE.replace("__DATA__", json.dumps(figure_data(race), ensure_ascii=False))
-    st.iframe(html, height=380)
+    data = json.dumps(figure_data(race), ensure_ascii=False).replace("</", "<\\/")
+    st.iframe(TEMPLATE.replace("__DATA__", data), height="content")
 
-    if race.finished:
-        finish_summary(race)
-
-    left, right = st.columns(2)
-    left.markdown("**런 (록스존 포함)**")
-    left.dataframe(segment_table(race, "run"), hide_index=True, width="stretch")
-    right.markdown("**스테이션**")
-    right.dataframe(segment_table(race, "station"), hide_index=True, width="stretch")
+    st.markdown("**구간 기록** · 런은 록스존 포함")
+    st.table(segment_table(race))
 
     st.caption(
         f"데이터 갱신 {datetime.now(TZ):%H:%M:%S} · {REFRESH_SEC}초마다 자동 갱신 · 출처 HYRESULT"
