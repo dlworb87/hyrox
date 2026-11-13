@@ -3,6 +3,7 @@
 실행: uv run streamlit run hyrox/app.py
 """
 
+import html
 import json
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ REFRESH_SEC = 30
 TZ = ZoneInfo("Asia/Seoul")  # 완주 기록의 통과 시각은 현지 시각이라 서울 대회 기준으로 해석
 STATION_ANIMS = ["ski", "push", "pull", "bbj", "row", "carry", "lunge", "wb"]
 TEMPLATE = (Path(__file__).parent / "figure.html").read_text(encoding="utf-8")
+MEMBERS = json.loads((Path(__file__).parent / "members.json").read_text(encoding="utf-8"))
 
 st.set_page_config(page_title="HYROX 트래커", layout="wide")
 
@@ -107,7 +109,40 @@ def finish_summary(race: Race) -> tuple[list[list[str]], str]:
     return summary, note
 
 
+def member_sidebar(current: str) -> None:
+    """디비전별 멤버 목록. 이름을 누르면 ?id= 주소로 다시 열려 바로 트래킹 화면이 된다."""
+    st.sidebar.markdown("### 우리 멤버")
+    groups: dict[str, list[dict]] = {}
+    for m in MEMBERS:
+        groups.setdefault(m["division"], []).append(m)
+    for division, members in groups.items():
+        items = []
+        for m in members:
+            rid = extract_id(m["url"])
+            cls = "member on" if rid == current else "member"
+            items.append(
+                f'<a class="{cls}" href="?id={rid}" target="_self">'
+                f"<b>{html.escape(m['name'])}</b><span>{html.escape(m['time'])}</span></a>"
+            )
+        st.sidebar.markdown(
+            f'<div class="division">{html.escape(division)}</div>' + "".join(items),
+            unsafe_allow_html=True,
+        )
+
+
+st.markdown(
+    """<style>
+    .division { font-size: 0.75rem; font-weight: 700; letter-spacing: .05em; color: #888; margin: 0.6rem 0 0.3rem; }
+    a.member { display: flex; justify-content: space-between; gap: 0.5rem; padding: 0.55rem 0.7rem; margin-bottom: 0.3rem;
+        border: 1px solid rgba(128,128,128,.3); border-radius: 0.5rem; text-decoration: none !important; color: inherit !important; }
+    a.member span { color: #888; white-space: nowrap; }
+    a.member.on { border-color: #e8b923; background: rgba(232,185,35,.12); }
+    </style>""",
+    unsafe_allow_html=True,
+)
+
 st.header("HYROX 실시간 트래커")
+member_sidebar(st.query_params.get("id", ""))
 # ?id=결과ID 로 열면 그 기록을 바로 보여준다
 url = st.text_input(
     "HYRESULT 결과 URL",
@@ -150,4 +185,4 @@ def tracker(result_id: str) -> None:
 if target:
     tracker(target)
 else:
-    st.info("HYRESULT에서 선수 결과 페이지를 열고, 주소를 위 입력란에 붙여넣어 주세요.")
+    st.info("왼쪽 위 메뉴(>)에서 멤버를 고르거나, HYRESULT 결과 페이지 주소를 위 입력란에 붙여넣어 주세요.")
