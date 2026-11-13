@@ -11,20 +11,8 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-from scraper import (
-    DIVISIONS_KO,
-    STATIONS,
-    STATIONS_KO,
-    Race,
-    extract_id,
-    fetch_race,
-    fmt,
-    list_divisions,
-    search_starters,
-)
+from scraper import STATIONS, STATIONS_KO, Race, extract_id, fetch_race, fmt
 
-DEFAULT_URL = "https://www.hyresult.com/result/LR3MS4JI5BA8ED"
-DEFAULT_EVENT = "s9-2026-seoul"
 REFRESH_SEC = 30
 TZ = ZoneInfo("Asia/Seoul")  # 완주 기록의 통과 시각은 현지 시각이라 서울 대회 기준으로 해석
 STATION_ANIMS = ["ski", "push", "pull", "bbj", "row", "carry", "lunge", "wb"]
@@ -36,16 +24,6 @@ st.set_page_config(page_title="HYROX 트래커", layout="wide")
 @st.cache_data(ttl=REFRESH_SEC - 5, show_spinner=False)
 def load(result_id: str) -> Race:
     return fetch_race(result_id)
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def load_divisions(event: str) -> list[str]:
-    return list_divisions(event)
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def load_search(event: str, division: str, name: str) -> list[dict]:
-    return search_starters(event, division, name)
 
 
 def wave_start_kst(race: Race) -> datetime | None:
@@ -127,36 +105,12 @@ def finish_summary(race: Race) -> None:
         )
 
 
-# ---------- 선수 찾기 ----------
-with st.sidebar:
-    st.header("선수 찾기")
-    mode = st.radio("방법", ["이름 검색", "URL 입력"], horizontal=True)
-    target = None
-    if mode == "이름 검색":
-        event = st.text_input("대회 코드", DEFAULT_EVENT, help="HYRESULT 대회 주소의 /event/ 뒤 부분")
-        try:
-            divisions = load_divisions(event)
-        except Exception as e:
-            divisions = []
-            st.error(f"대회 정보를 불러오지 못했습니다: {e}")
-        if divisions:
-            division = st.selectbox("디비전", divisions, format_func=lambda d: DIVISIONS_KO.get(d, d))
-            name = st.text_input("이름", placeholder="일부만 입력해도 됩니다 (예: 정우)")
-            if name.strip():
-                results = load_search(event, division, name.strip())
-                if results:
-                    pick = st.selectbox(
-                        f"검색 결과 {len(results)}팀",
-                        results,
-                        format_func=lambda r: f"{r['names']} · {r['age_group']} · {r['wave']}",
-                    )
-                    target = pick["id"]
-                else:
-                    st.info("검색 결과가 없습니다")
-    else:
-        target = extract_id(st.text_input("HYRESULT 결과 URL", DEFAULT_URL))
-
 st.title("HYROX 실시간 트래커")
+url = st.text_input(
+    "HYRESULT 결과 URL",
+    placeholder="https://www.hyresult.com/result/...",
+)
+target = extract_id(url) if url.strip() else None
 
 
 @st.fragment(run_every=REFRESH_SEC)
@@ -194,4 +148,4 @@ def tracker(result_id: str) -> None:
 if target:
     tracker(target)
 else:
-    st.info("왼쪽에서 대회·디비전·이름으로 선수를 검색해 주세요.")
+    st.info("HYRESULT에서 선수 결과 페이지를 열고, 주소를 위 입력란에 붙여넣어 주세요.")

@@ -10,15 +10,12 @@
 실시간(Live) 페이지
 - 구간 표: t_r1..t_w8 행마다 구간 시간(Time)과 누적시간(Total)
 - startedAt(UTC), isRunning
-
-출전자 명단: /starters/{대회}?dg={디비전}&q={이름} 으로 검색된다.
 """
 
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from urllib.parse import quote
+from datetime import datetime, timedelta
 
 import requests
 
@@ -45,25 +42,6 @@ STATIONS_KO = [
     "샌드백 런지",
     "월볼",
 ]
-DIVISIONS_KO = {
-    "men": "싱글 남자",
-    "women": "싱글 여자",
-    "pro-men": "프로 남자",
-    "pro-women": "프로 여자",
-    "doubles-men": "더블 남자",
-    "doubles-women": "더블 여자",
-    "doubles-mixed": "더블 혼성",
-    "pro-doubles-men": "프로 더블 남자",
-    "pro-doubles-women": "프로 더블 여자",
-    "team-relay-men": "릴레이 남자",
-    "team-relay-women": "릴레이 여자",
-    "team-relay-mixed": "릴레이 혼성",
-    "adaptive-men": "어댑티브 남자",
-    "adaptive-women": "어댑티브 여자",
-}
-DAYS_KO = {"Monday": "월", "Tuesday": "화", "Wednesday": "수", "Thursday": "목",
-           "Friday": "금", "Saturday": "토", "Sunday": "일"}
-
 
 @dataclass
 class Segment:
@@ -254,32 +232,6 @@ def fetch_race(url_or_id: str) -> Race:
     if '["$","tr","t_r1",' in payload:
         return _parse_live(rid, html, payload)
     raise ValueError("기록 데이터를 찾지 못했습니다 (아직 출발 전이거나 사이트 구조가 바뀌었을 수 있음)")
-
-
-def list_divisions(event: str) -> list[str]:
-    """대회의 디비전 코드 목록 (예: doubles-men)."""
-    html = _get(f"/event/{event}")
-    found = re.findall(rf'href="/starters/{re.escape(event)}\?dg=([a-z-]+)"', html)
-    return list(dict.fromkeys(found))
-
-
-def search_starters(event: str, division: str, name: str) -> list[dict]:
-    """출전자 명단에서 이름으로 검색한다. 결과는 최대 100팀."""
-    html = _get(f"/starters/{event}?dg={division}&q={quote(name)}")
-    payload = _rsc_payload(html)
-    out = []
-    for m in re.finditer(r'\{"idp":"([A-Z0-9]+)"(?:,"nation":[^,]*)?,"athletes":', payload):
-        athletes, end = json.JSONDecoder().raw_decode(payload, m.end())
-        rest = re.match(r',"dg":"([^"]*)","ag":"([^"]*)","day":"([^"]*)","time":"([^"]*)"', payload[end:])
-        if not rest or any(o["id"] == m.group(1) for o in out):
-            continue
-        out.append({
-            "id": m.group(1),
-            "names": ", ".join(a["name"] for a in athletes),
-            "age_group": rest.group(2),
-            "wave": f"{DAYS_KO.get(rest.group(3), rest.group(3))} {rest.group(4)}",
-        })
-    return out
 
 
 def fmt(sec: int | None) -> str:
