@@ -1,0 +1,292 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --run: #e4572e; --station: #2e86de; --gold: #f0b429; --ink: #1f2933; --muted: #7b8794; --live: #e12d39; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; color: var(--ink); background: transparent; }
+  .card { background: #fff; border: 1px solid #e4e7eb; border-radius: 14px; padding: 16px; }
+  .card.finish { border: 2px solid var(--gold); background: linear-gradient(180deg, #fffbea 0%, #fff 60%); }
+  .top { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+  canvas { width: 360px; max-width: 100%; height: 240px; background: #f7f9fb; border-radius: 10px; }
+  .finish canvas { background: #fff8e1; }
+  .info { flex: 1; min-width: 220px; }
+  .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; padding: 3px 10px; border-radius: 999px; margin-bottom: 8px; }
+  .badge.live { color: #fff; background: var(--live); }
+  .badge.live .dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; animation: blink 1s infinite; }
+  .badge.wait { color: var(--muted); background: #eef1f4; }
+  .badge.done { color: #8d5b00; background: #ffe8a3; }
+  @keyframes blink { 50% { opacity: .2; } }
+  .stage { font-size: 28px; font-weight: 800; }
+  .stage small { display: block; font-size: 14px; font-weight: 500; color: var(--muted); margin-top: 2px; }
+  .clock-label { font-size: 13px; color: var(--muted); margin-top: 14px; }
+  .clock { font-size: 40px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .clock.sub { font-size: 24px; }
+  .finish .clock { color: #b7791f; font-size: 48px; }
+  .flow { height: 6px; border-radius: 3px; margin-top: 8px; max-width: 280px; display: none;
+          background: repeating-linear-gradient(-45deg, var(--live) 0 10px, #ffb3b8 10px 20px);
+          background-size: 28px 6px; animation: flow 0.8s linear infinite; }
+  .live-on .flow { display: block; }
+  @keyframes flow { to { background-position: 28px 0; } }
+  .strip { display: grid; grid-template-columns: repeat(16, 1fr); gap: 4px; margin-top: 16px; }
+  .seg { position: relative; overflow: hidden; border-radius: 6px; padding: 5px 2px; text-align: center; font-size: 11px; background: #eef1f4; color: var(--muted); }
+  .seg b { display: block; font-size: 12px; }
+  .seg span { position: relative; }
+  .seg.done { background: #dde3ea; color: var(--ink); }
+  .seg.cur { color: #fff; }
+  .seg.cur.run { background: #f4a28c; } .seg.cur.station { background: #8fbbe9; }
+  .seg.cur::before { content: ""; position: absolute; inset: 0; transform-origin: left; animation: fill 2.4s ease-in-out infinite; }
+  .seg.cur.run::before { background: var(--run); } .seg.cur.station::before { background: var(--station); }
+  @keyframes fill { 0% { transform: scaleX(0); } 85%, 100% { transform: scaleX(1); } }
+  .finish .seg.done { background: #ffe8a3; }
+  @media (max-width: 640px) { .strip { grid-template-columns: repeat(8, 1fr); } }
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="top">
+    <canvas id="cv" width="720" height="480"></canvas>
+    <div class="info">
+      <div id="badge"></div>
+      <div class="stage" id="stage"></div>
+      <div class="clock-label" id="elapsedLabel">웨이브 시작 후 경과</div>
+      <div class="clock" id="elapsed">-</div>
+      <div class="flow"></div>
+      <div class="clock-label" id="stageLabel">현재 단계 진행</div>
+      <div class="clock sub" id="stageElapsed">-</div>
+    </div>
+  </div>
+  <div class="strip" id="strip"></div>
+</div>
+<script>
+const DATA = __DATA__;
+
+// ---------- 시간 표시 ----------
+function fmt(sec) {
+  if (sec == null || isNaN(sec) || sec < 0) return "-";
+  sec = Math.floor(sec);
+  const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), s = sec % 60;
+  const mm = String(m).padStart(h ? 2 : 1, "0"), ss = String(s).padStart(2, "0");
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+const SHORT = ["Ski", "Push", "Pull", "BBJ", "Row", "Carry", "Lunge", "WB"];
+const strip = document.getElementById("strip");
+DATA.segments.forEach((s, i) => {
+  const el = document.createElement("div");
+  const state = i < DATA.stage ? "done" : i === DATA.stage ? "cur" : "";
+  el.className = `seg ${s.kind} ${state}`;
+  el.innerHTML = `<span><b>${s.kind === "run" ? "R" + s.no : SHORT[s.no - 1]}</b>${s.duration != null ? fmt(s.duration) : "&nbsp;"}</span>`;
+  strip.appendChild(el);
+});
+
+const card = document.getElementById("card");
+const badge = document.getElementById("badge");
+document.getElementById("stage").innerHTML = DATA.stageTitle + (DATA.stageSub ? `<small>${DATA.stageSub}</small>` : "");
+
+if (DATA.finished) {
+  card.classList.add("finish");
+  badge.innerHTML = `<span class="badge done">🏅 완주</span>`;
+  document.getElementById("elapsedLabel").textContent = "최종 기록";
+  document.getElementById("elapsed").textContent = fmt(DATA.total);
+  document.getElementById("stageLabel").textContent = DATA.rank ? "순위" : "웨이브 시작";
+  document.getElementById("stageElapsed").textContent =
+    DATA.rank ? `${DATA.rank} / ${DATA.fieldSize}` : (DATA.waveStartText || "-");
+} else if (DATA.running) {
+  card.classList.add("live-on");
+  badge.innerHTML = `<span class="badge live"><span class="dot"></span>LIVE 진행 중</span>`;
+} else {
+  badge.innerHTML = `<span class="badge wait">기록 대기</span>`;
+}
+
+function tickClock() {
+  if (DATA.finished || DATA.waveStartEpoch == null) return;
+  const elapsed = Date.now() / 1000 - DATA.waveStartEpoch;
+  document.getElementById("elapsed").textContent = fmt(elapsed);
+  document.getElementById("stageElapsed").textContent = fmt(elapsed - (DATA.lastCumulative || 0));
+}
+tickClock();
+setInterval(tickClock, 1000);
+
+// ---------- 인물 애니메이션 ----------
+// 각도(도): 0 = 아래, 90 = 앞(오른쪽), 180 = 위
+// 다리: t = 허벅지 절대각, k = 무릎 상대각(음수면 정강이가 뒤로)
+// 팔: a = 위팔 절대각, e = 팔꿈치 상대각
+const P = (o) => Object.assign({ x: 0, y: 0, torso: 0, lt: 0, lk: 0, rt: 0, rk: 0, la: 8, le: 0, ra: 8, re: 0 }, o);
+const swap = (p) => P({ ...p, lt: p.rt, lk: p.rk, rt: p.lt, rk: p.lk, la: p.ra, le: p.re, ra: p.la, re: p.le });
+
+const runA = P({ torso: 12, rt: 45, rk: -50, lt: -25, lk: -85, ra: -40, re: 90, la: 45, le: 80 });
+const pushA = P({ y: 12, torso: 60, rt: 50, rk: -80, lt: -35, lk: -15, ra: 75, re: 10, la: 75, le: 10 });
+const pullA = P({ y: 8, torso: -15, lt: 25, lk: -35, rt: 30, rk: -40, ra: 115, re: -5, la: 15, le: 70 });
+const walkA = P({ rt: 22, rk: -12, lt: -18, lk: -30, ra: 4, la: 4 });
+const lungeA = P({ y: 20, rt: 85, rk: -85, lt: -30, lk: -75, ra: 150, re: -165, la: 150, le: -165 });
+const lungeUp = P({ ra: 150, re: -165, la: 150, le: -165 });
+const squatWB = P({ y: 22, torso: 25, lt: 85, lk: -110, rt: 85, rk: -110, ra: 55, re: 85, la: 55, le: 85 });
+const throwWB = P({ y: -2, ra: 172, la: 172 });
+const stand = P({});
+const squatB = P({ y: 18, torso: 45, lt: 80, lk: -115, rt: 80, rk: -115, ra: 15, la: 15 });
+const plank = P({ y: 26, torso: 78, lt: -70, rt: -70, ra: -2, la: -2 });
+const plankLow = P({ ...plank, y: 32, ra: -20, re: 40, la: -20, le: 40 });
+const crouch = P({ y: 12, torso: 30, lt: 60, lk: -90, rt: 60, rk: -90, ra: -45, la: -45 });
+const jump = P({ y: -26, torso: 10, lt: 25, lk: -50, rt: 30, rk: -45, ra: 170, la: 165 });
+const skiUp = P({ torso: 5, ra: 172, la: 168 });
+const skiDown = P({ y: 9, torso: 42, lt: 35, lk: -55, rt: 35, rk: -55, ra: 15, re: 25, la: 15, le: 25 });
+const rowCatch = P({ y: 30, torso: 28, lt: 130, lk: -112, rt: 130, rk: -112, ra: 88, la: 88 });
+const rowFinish = P({ y: 30, torso: -22, lt: 95, rt: 95, ra: -35, re: 115, la: -35, le: 115 });
+const cheerA = P({ ra: 150, la: 210 });
+const cheerB = P({ y: -10, lt: 10, lk: -30, rt: 15, rk: -35, ra: 135, re: 15, la: 225, le: -15 });
+
+const ACTS = {
+  run:   { period: 640, frames: [[0, runA], [0.5, swap(runA)], [1, runA]], ground: 3.2 },
+  ski:   { period: 1600, frames: [[0, skiUp], [0.45, skiDown], [0.6, skiDown], [1, skiUp]], prop: "ski" },
+  push:  { period: 1100, frames: [[0, pushA], [0.5, swap(pushA)], [1, pushA]], ground: 1.1, prop: "sled" },
+  pull:  { period: 1300, frames: [[0, pullA], [0.5, swap(pullA)], [1, pullA]], prop: "rope" },
+  bbj:   { period: 2600, frames: [[0, stand], [0.12, squatB], [0.25, plank], [0.33, plankLow], [0.42, plank], [0.55, squatB], [0.65, crouch], [0.78, jump], [0.9, crouch], [1, stand]] },
+  row:   { period: 2000, frames: [[0, rowCatch], [0.4, rowFinish], [0.5, rowFinish], [1, rowCatch]], prop: "rower" },
+  carry: { period: 900, frames: [[0, walkA], [0.5, swap(walkA)], [1, walkA]], ground: 1.6, prop: "kb" },
+  lunge: { period: 2800, frames: [[0, lungeUp], [0.25, lungeA], [0.5, lungeUp], [0.75, swap(lungeA)], [1, lungeUp]], prop: "bag" },
+  wb:    { period: 2000, frames: [[0, squatWB], [0.3, throwWB], [0.75, throwWB], [1, squatWB]], prop: "ball" },
+  cheer: { period: 800, frames: [[0, cheerA], [0.5, cheerB], [1, cheerA]], prop: "medal" },
+  idle:  { period: 2400, frames: [[0, stand], [0.5, P({ y: 1 })], [1, stand]] },
+};
+
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+ctx.scale(2, 2);
+const W = 360, H = 240, GROUND = 196;
+const L = { torso: 40, thigh: 28, shin: 28, upper: 20, fore: 19, head: 10 };
+const BASE = { x: 165, y: GROUND - L.thigh - L.shin };
+const rad = (d) => d * Math.PI / 180;
+const pt = (o, deg, len) => ({ x: o.x + Math.sin(rad(deg)) * len, y: o.y + Math.cos(rad(deg)) * len });
+const ease = (t) => 0.5 - 0.5 * Math.cos(Math.PI * t);
+
+function poseAt(act, t) {
+  const f = act.frames;
+  for (let i = 0; i < f.length - 1; i++) {
+    const [t0, p0] = f[i], [t1, p1] = f[i + 1];
+    if (t >= t0 && t <= t1) {
+      const u = ease((t - t0) / (t1 - t0 || 1)), out = {};
+      for (const k in p0) out[k] = p0[k] + (p1[k] - p0[k]) * u;
+      return out;
+    }
+  }
+  return f[0][1];
+}
+
+function line(a, b, w, color) {
+  ctx.strokeStyle = color; ctx.lineWidth = w; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+}
+
+function skeleton(p) {
+  const hip = { x: BASE.x + p.x, y: BASE.y + p.y };
+  const sh = pt(hip, 180 - p.torso, L.torso);
+  const head = pt(sh, 180 - p.torso, L.head + 4);
+  const limb = (o, a, b, l1, l2) => { const m = pt(o, a, l1); return [m, pt(m, a + b, l2)]; };
+  const [lk, lf] = limb(hip, p.lt, p.lk, L.thigh, L.shin);
+  const [rk, rf] = limb(hip, p.rt, p.rk, L.thigh, L.shin);
+  const [le, lh] = limb(sh, p.la, p.le, L.upper, L.fore);
+  const [re, rh] = limb(sh, p.ra, p.re, L.upper, L.fore);
+  return { hip, sh, head, lk, lf, rk, rf, le, lh, re, rh, torso: p.torso };
+}
+
+function drawFigure(s, accent) {
+  const back = "#9aa5b1", front = "#1f2933";
+  line(s.hip, s.lk, 7, back); line(s.lk, s.lf, 6, back);
+  line(s.sh, s.le, 6, back); line(s.le, s.lh, 5, back);
+  line(s.hip, s.sh, 9, accent);
+  line(s.hip, s.rk, 7, front); line(s.rk, s.rf, 6, front);
+  line(s.sh, s.re, 6, front); line(s.re, s.rh, 5, front);
+  ctx.fillStyle = front; ctx.beginPath(); ctx.arc(s.head.x, s.head.y, L.head, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawGround(offset) {
+  ctx.strokeStyle = "#cbd2d9"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, GROUND); ctx.lineTo(W, GROUND); ctx.stroke();
+  ctx.strokeStyle = "#e4e7eb";
+  for (let x = -offset % 30; x < W; x += 30) { ctx.beginPath(); ctx.moveTo(x, GROUND + 6); ctx.lineTo(x + 12, GROUND + 6); ctx.stroke(); }
+}
+
+// 완주 화면의 꽃가루
+const CONFETTI = Array.from({ length: 70 }, (_, i) => ({
+  x: Math.random() * W, y: Math.random() * H, v: 25 + Math.random() * 45, sway: Math.random() * 6.28,
+  size: 3 + Math.random() * 4, color: ["#f0b429", "#e4572e", "#2e86de", "#3ebd93", "#9446ed"][i % 5],
+}));
+function drawConfetti(sec) {
+  CONFETTI.forEach((c) => {
+    const y = (c.y + sec * c.v) % (H + 10) - 10;
+    const x = c.x + Math.sin(sec * 2 + c.sway) * 8;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(sec * 3 + c.sway);
+    ctx.fillStyle = c.color; ctx.fillRect(-c.size / 2, -c.size / 4, c.size, c.size / 2);
+    ctx.restore();
+  });
+}
+
+function drawProp(kind, s, t) {
+  ctx.fillStyle = "#52606d"; ctx.strokeStyle = "#52606d";
+  if (kind === "ski") {
+    const mx = BASE.x + 52;
+    ctx.fillRect(mx, 40, 12, GROUND - 40); ctx.fillRect(mx - 10, GROUND - 6, 32, 6);
+    line({ x: mx + 2, y: 46 }, s.rh, 2, "#52606d"); line({ x: mx + 2, y: 46 }, s.lh, 2, "#52606d");
+  } else if (kind === "sled") {
+    const x = s.rh.x + 2;
+    line(s.rh, { x: x + 4, y: GROUND - 18 }, 4, "#52606d");
+    ctx.fillRect(x, GROUND - 22, 44, 16); ctx.fillRect(x - 4, GROUND - 6, 52, 4);
+  } else if (kind === "rope") {
+    const sx = W - 34;
+    ctx.fillRect(sx, GROUND - 20, 30, 16); ctx.fillRect(sx - 4, GROUND - 6, 38, 4);
+    ctx.beginPath(); ctx.lineWidth = 2; ctx.moveTo(s.rh.x, s.rh.y);
+    ctx.quadraticCurveTo((s.rh.x + sx) / 2, GROUND - 4, sx, GROUND - 14); ctx.stroke();
+    line(s.lh, { x: s.lh.x - 18, y: GROUND - 1 }, 2, "#52606d");
+  } else if (kind === "rower") {
+    ctx.fillRect(BASE.x - 40, GROUND - 14, 140, 5);
+    ctx.fillRect(s.hip.x - 10, s.hip.y + 3, 22, 6);
+    ctx.beginPath(); ctx.arc(BASE.x + 110, GROUND - 26, 16, 0, Math.PI * 2); ctx.lineWidth = 4; ctx.stroke();
+    line({ x: BASE.x + 110, y: GROUND - 26 }, s.rh, 2, "#52606d");
+  } else if (kind === "kb") {
+    [s.lh, s.rh].forEach((h) => { ctx.beginPath(); ctx.arc(h.x, h.y + 9, 7, 0, Math.PI * 2); ctx.fill(); });
+  } else if (kind === "bag") {
+    ctx.fillStyle = "#8d6e63";
+    const b = pt(s.sh, 180 - s.torso, 2);
+    ctx.beginPath(); ctx.roundRect(b.x - 22, b.y - 8, 44, 13, 6); ctx.fill();
+  } else if (kind === "ball") {
+    const tx = BASE.x + 46, ty = 34;
+    ctx.fillStyle = "#f5a623"; ctx.fillRect(tx - 14, ty - 3, 28, 6);
+    let bx = (s.rh.x + s.lh.x) / 2, by = (s.rh.y + s.lh.y) / 2 - 6;
+    if (t > 0.3 && t < 0.75) {
+      const u = (t - 0.3) / 0.45, peak = Math.sin(Math.PI * u);
+      bx = bx + (tx - bx) * peak; by = by + (ty - by) * peak;
+    }
+    ctx.fillStyle = "#d64545"; ctx.beginPath(); ctx.arc(bx, by, 9, 0, Math.PI * 2); ctx.fill();
+  } else if (kind === "medal") {
+    // 목에 건 메달
+    const n = pt(s.sh, 180 - s.torso, 3), m = { x: s.hip.x + 2, y: s.sh.y + 16 };
+    line({ x: n.x - 6, y: n.y }, m, 3, "#2e86de"); line({ x: n.x + 6, y: n.y }, m, 3, "#e4572e");
+    ctx.fillStyle = "#f0b429"; ctx.beginPath(); ctx.arc(m.x, m.y + 6, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#b7791f"; ctx.lineWidth = 2; ctx.stroke();
+  }
+}
+
+const act = ACTS[DATA.anim] || ACTS.idle;
+const accent = DATA.kind === "run" ? "#e4572e" : DATA.kind === "station" ? "#2e86de" : DATA.kind === "finish" ? "#f0b429" : "#9aa5b1";
+const start = performance.now();
+function frame(now) {
+  const el = now - start, t = (el % act.period) / act.period;
+  ctx.clearRect(0, 0, W, H);
+  if (DATA.anim === "cheer") drawConfetti(el / 1000);
+  drawGround(act.ground ? el / 1000 * act.ground * 60 : 0);
+  const s = skeleton(poseAt(act, t));
+  if (act.prop === "rower") drawProp(act.prop, s, t);
+  drawFigure(s, accent);
+  if (act.prop && act.prop !== "rower") drawProp(act.prop, s, t);
+  if (DATA.anim === "cheer") {
+    ctx.fillStyle = "#b7791f"; ctx.font = "bold 26px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("FINISH", W / 2, 34);
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
